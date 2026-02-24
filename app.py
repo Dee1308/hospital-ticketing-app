@@ -53,10 +53,14 @@ def login():
         submitted = st.form_submit_button("Login")
         
         if submitted:
-            if username in USERS and USERS[username]["password"] == password:
+            # Convert whatever they typed into lowercase right away
+            safe_username = username.lower()
+            
+            # Check the lowercase version against our database
+            if safe_username in USERS and USERS[safe_username]["password"] == password:
                 st.session_state.logged_in = True
-                st.session_state.username = username
-                st.session_state.role = USERS[username]["role"]
+                st.session_state.username = safe_username
+                st.session_state.role = USERS[safe_username]["role"]
                 st.rerun()
             else:
                 st.error("Invalid credentials")
