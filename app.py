@@ -160,4 +160,6 @@ else:
     if st.session_state.role == "User":
         user_dashboard()
     elif st.session_state.role == "Supervisor":
-        supervisor
+        supervisor_dashboard()
+    elif st.session_state.role == "Engineer":
+        engineer_dashboard()
