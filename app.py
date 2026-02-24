@@ -1,25 +1,51 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+from streamlit_gsheets import GSheetsConnection
 
-# --- 1. MOCK DATABASE & USERS ---
-# We are creating fake accounts to test the Role & Department-based access [cite: 15]
+# --- 1. SETUP DATABASE CONNECTION ---
+# This establishes a live connection to your Google Sheet
+conn = st.connection("gsheets", type=GSheetsConnection)
+
+# Function to fetch latest data
+def get_data():
+    # ttl=0 means "don't cache, always get fresh data"
+    return conn.read(worksheet="Tickets", ttl=0)
+
+# Function to save data
+def add_data(new_row_df):
+    try:
+        current_data = get_data()
+        updated_data = pd.concat([current_data, new_row_df], ignore_index=True)
+        conn.update(worksheet="Tickets", data=updated_data)
+        st.cache_data.clear() # Clear cache to force reload next time
+        return True
+    except Exception as e:
+        st.error(f"Database Error: {e}")
+        return False
+
+# Function to update a specific ticket (for Supervisors/Engineers)
+def update_ticket_status(ticket_id, col_name, new_value):
+    df = get_data()
+    # Find the row index
+    mask = df["Ticket ID"] == ticket_id
+    if mask.any():
+        df.loc[mask, col_name] = new_value
+        conn.update(worksheet="Tickets", data=df)
+        st.cache_data.clear()
+        return True
+    return False
+
+# --- 2. USERS (Still Hardcoded for Safety) ---
 USERS = {
     "staff": {"password": "123", "role": "User"},
     "supervisor": {"password": "123", "role": "Supervisor"},
     "engineer": {"password": "123", "role": "Engineer"}
 }
 
-# Temporary database to hold tickets while the app is running
-if 'tickets' not in st.session_state:
-    st.session_state.tickets = pd.DataFrame(columns=[
-        "Ticket ID", "Raised by", "Ward", "Help Department", 
-        "Issue Type", "Description", "Priority", "Status", "Assigned To", "Timestamp"
-    ])
-
-# --- 2. LOGIN MODULE [cite: 13] ---
+# --- 3. LOGIN MODULE ---
 def login():
-    st.title("Hospital Ticketing Service Portal")
+    st.title("🏥 Hospital Ticketing Portal (Live DB)")
     st.subheader("Login")
     with st.form("login_form"):
         username = st.text_input("Username")
@@ -33,104 +59,105 @@ def login():
                 st.session_state.role = USERS[username]["role"]
                 st.rerun()
             else:
-                st.error("Invalid username or password.")
+                st.error("Invalid credentials")
 
-# --- 3. USER (HOSPITAL STAFF) DASHBOARD ---
+# --- 4. DASHBOARDS ---
+
 def user_dashboard():
-    st.header(f"Welcome, {st.session_state.username} (Staff)")
-    st.subheader("Raise a New Ticket [cite: 20]")
+    st.header(f"Welcome, {st.session_state.username}")
     
+    # Form to raise ticket
     with st.form("ticket_form"):
-        ward = st.text_input("Requesting Department (Ward) [cite: 26]")
-        dept = st.selectbox("Help Department (IT or Maintenance) [cite: 27]", ["IT", "Maintenance"])
+        ward = st.text_input("Ward / Department")
+        dept = st.selectbox("Help Department", ["IT", "Maintenance"])
         
-        # Sample Issue Categories [cite: 32]
         if dept == "IT":
-            issue = st.selectbox("Issue Type [cite: 28]", ["PC not working [cite: 41]", "Printer not working [cite: 42]", "Network issue [cite: 44]", "Other"])
+            issue = st.selectbox("Issue", ["PC Issue", "Printer", "Network", "Software", "Other"])
         else:
-            issue = st.selectbox("Issue Type [cite: 28]", ["AC not working [cite: 34]", "Tap leakage [cite: 37]", "Light not working [cite: 36]", "Other"])
+            issue = st.selectbox("Issue", ["AC", "Lights", "Plumbing", "Furniture", "Other"])
             
-        desc = st.text_area("Issue Description [cite: 29]")
-        priority = st.selectbox("Priority [cite: 30]", ["Low", "Medium", "High"])
+        desc = st.text_area("Description")
+        priority = st.selectbox("Priority", ["Low", "Medium", "High"])
         
         if st.form_submit_button("Submit Ticket"):
             if ward and desc:
-                # Ticket ID (auto-generated) [cite: 24]
-                ticket_id = f"TKT-{datetime.now().strftime('%H%M%S')}"
-                new_data = pd.DataFrame([{
-                    "Ticket ID": ticket_id, "Raised by": st.session_state.username,
+                ticket_id = f"TKT-{datetime.now().strftime('%d%H%M%S')}"
+                new_ticket = pd.DataFrame([{
+                    "Ticket ID": ticket_id, "Raised By": st.session_state.username,
                     "Ward": ward, "Help Department": dept, "Issue Type": issue,
                     "Description": desc, "Priority": priority, "Status": "Open",
                     "Assigned To": "Unassigned", "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M")
                 }])
-                st.session_state.tickets = pd.concat([st.session_state.tickets, new_data], ignore_index=True)
-                st.success(f"Ticket {ticket_id} raised successfully!")
+                
+                if add_data(new_ticket):
+                    st.success(f"Ticket {ticket_id} Saved to Database!")
             else:
-                st.error("Please fill in all fields.")
+                st.warning("Please fill all fields")
 
-    st.subheader("My Tickets")
-    my_tickets = st.session_state.tickets[st.session_state.tickets["Raised by"] == st.session_state.username]
-    st.dataframe(my_tickets)
+    # View My Tickets
+    st.subheader("My Past Tickets")
+    df = get_data()
+    # Filter for current user. Note: Check column names match Sheet exactly!
+    if not df.empty and "Raised By" in df.columns:
+        my_tickets = df[df["Raised By"] == st.session_state.username]
+        st.dataframe(my_tickets)
 
-# --- 4. SUPERVISOR DASHBOARD ---
 def supervisor_dashboard():
     st.header("Supervisor Dashboard")
-    st.write("View unassigned tickets and Assign tickets to available engineers [cite: 50, 51]")
+    df = get_data()
+    st.dataframe(df)
     
-    st.dataframe(st.session_state.tickets)
-    
-    st.subheader("Assign a Ticket")
-    with st.form("assign_form"):
-        # Select from available ticket IDs
-        ticket_to_assign = st.selectbox("Select Ticket ID", st.session_state.tickets["Ticket ID"].tolist())
-        engineer_name = st.text_input("Engineer Username (e.g., 'engineer')")
+    st.subheader("Assign Ticket")
+    with st.form("assign"):
+        if not df.empty and "Assigned To" in df.columns:
+            open_tickets = df[df["Assigned To"] == "Unassigned"]["Ticket ID"].tolist()
+        else:
+            open_tickets = []
+            
+        t_id = st.selectbox("Select Ticket", open_tickets) if open_tickets else None
+        eng_name = st.text_input("Assign to Engineer (Name)")
         
         if st.form_submit_button("Assign"):
-            if ticket_to_assign and engineer_name:
-                # Update the database
-                st.session_state.tickets.loc[st.session_state.tickets["Ticket ID"] == ticket_to_assign, "Assigned To"] = engineer_name
-                st.session_state.tickets.loc[st.session_state.tickets["Ticket ID"] == ticket_to_assign, "Status"] = "Assigned"
-                st.success(f"Ticket assigned to {engineer_name}.")
+            if t_id and eng_name:
+                update_ticket_status(t_id, "Assigned To", eng_name)
+                update_ticket_status(t_id, "Status", "Assigned")
+                st.success("Assigned!")
                 st.rerun()
 
-# --- 5. ENGINEER DASHBOARD ---
 def engineer_dashboard():
-    st.header(f"Engineer Dashboard: {st.session_state.username}")
-    st.write("View assigned tickets [cite: 58]")
+    st.header(f"Engineer: {st.session_state.username}")
+    df = get_data()
     
-    # Filter tickets assigned to this engineer
-    my_tasks = st.session_state.tickets[st.session_state.tickets["Assigned To"] == st.session_state.username]
+    if not df.empty and "Status" in df.columns:
+        my_tasks = df[df["Status"] == "Assigned"] 
+    else:
+        my_tasks = pd.DataFrame()
+        
     st.dataframe(my_tasks)
     
-    st.subheader("Update Ticket Status")
-    with st.form("update_form"):
-        task_to_update = st.selectbox("Select Ticket ID", my_tasks["Ticket ID"].tolist() if not my_tasks.empty else ["No tickets"])
-        # Change status to: Resolved , In Progress , or On Hold 
-        new_status = st.selectbox("New Status", ["In Progress", "On Hold", "Resolved"])
-        notes = st.text_area("Add notes (e.g. diagnosis, steps taken) [cite: 59]")
+    st.subheader("Update Status")
+    with st.form("update"):
+        t_id = st.selectbox("Select Ticket", my_tasks["Ticket ID"].tolist()) if not my_tasks.empty else None
+        status = st.selectbox("New Status", ["In Progress", "Resolved"])
         
-        if st.form_submit_button("Update Status"):
-            if task_to_update != "No tickets":
-                st.session_state.tickets.loc[st.session_state.tickets["Ticket ID"] == task_to_update, "Status"] = new_status
-                st.success(f"Ticket {task_to_update} marked as {new_status}.")
+        if st.form_submit_button("Update"):
+            if t_id:
+                update_ticket_status(t_id, "Status", status)
+                st.success("Updated!")
                 st.rerun()
 
-# --- 6. MAIN APP CONTROLLER ---
+# --- 5. MAIN APP ---
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
 
 if not st.session_state.logged_in:
     login()
 else:
-    # Logout button
     if st.sidebar.button("Logout"):
         st.session_state.logged_in = False
         st.rerun()
         
-    # Route to the correct dashboard based on role
     if st.session_state.role == "User":
         user_dashboard()
     elif st.session_state.role == "Supervisor":
-        supervisor_dashboard()
-    elif st.session_state.role == "Engineer":
-        engineer_dashboard()
+        supervisor
