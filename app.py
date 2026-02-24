@@ -40,7 +40,8 @@ def update_ticket_status(ticket_id, col_name, new_value):
 USERS = {
     "staff": {"password": "123", "role": "User"},
     "supervisor": {"password": "123", "role": "Supervisor"},
-    "engineer": {"password": "123", "role": "Engineer"}
+    "engineer": {"password": "123", "role": "Engineer"},
+    "admin": {"password": "123", "role": "Admin"}  # <-- ADDED THIS LINE
 }
 
 # --- 3. LOGIN MODULE ---
@@ -128,6 +129,66 @@ def supervisor_dashboard():
                 st.success("Assigned!")
                 st.rerun()
 
+def admin_dashboard():
+    st.header("👑 Admin & Analytics Dashboard")
+    st.write("System oversight and reporting.")
+    
+    df = get_data()
+    
+    if df.empty:
+        st.warning("No tickets in the database yet.")
+        return
+
+    # --- High-Level Metrics [cite: 68] ---
+    st.subheader("System Overview")
+    col1, col2, col3, col4 = st.columns(4)
+    
+    total_tickets = len(df)
+    open_tickets = len(df[df["Status"] == "Open"])
+    assigned_tickets = len(df[df["Status"] == "Assigned"])
+    resolved_tickets = len(df[df["Status"] == "Resolved"])
+
+    col1.metric("Total Tickets", total_tickets)
+    col2.metric("Pending (Open)", open_tickets)
+    col3.metric("Assigned", assigned_tickets)
+    col4.metric("Resolved", resolved_tickets)
+
+    # --- Charts & Analytics ---
+    st.write("---")
+    col_chart1, col_chart2 = st.columns(2)
+
+    with col_chart1:
+        st.subheader("Department Breakdown") # [cite: 71]
+        dept_counts = df["Help Department"].value_counts()
+        st.bar_chart(dept_counts)
+
+    with col_chart2:
+        st.subheader("Engineer Workload") # [cite: 70]
+        # Filter out unassigned tickets to see actual engineer workload
+        assigned_df = df[df["Assigned To"] != "Unassigned"]
+        if not assigned_df.empty:
+            eng_counts = assigned_df["Assigned To"].value_counts()
+            st.bar_chart(eng_counts)
+        else:
+            st.info("No tickets assigned to engineers yet.")
+
+    # --- Data Export [cite: 73] ---
+    st.write("---")
+    st.subheader("Export System Data")
+    
+    # Convert dataframe to CSV format
+    csv = df.to_csv(index=False).encode('utf-8')
+    
+    st.download_button(
+        label="📥 Download Full Report as CSV (Excel)",
+        data=csv,
+        file_name=f"hospital_tickets_report_{datetime.now().strftime('%Y%m%d')}.csv",
+        mime="text/csv",
+    )
+    
+    st.write("Raw Data View:")
+    st.dataframe(df)
+
 def engineer_dashboard():
     st.header(f"Engineer: {st.session_state.username}")
     df = get_data()
@@ -167,3 +228,5 @@ else:
         supervisor_dashboard()
     elif st.session_state.role == "Engineer":
         engineer_dashboard()
+    elif st.session_state.role == "Admin":      # <-- ADDED THIS
+        admin_dashboard()                       # <-- ADDED THIS
