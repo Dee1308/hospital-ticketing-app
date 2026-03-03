@@ -41,7 +41,7 @@ USERS = {
     "staff": {"password": "123", "role": "User"},
     "supervisor": {"password": "123", "role": "Supervisor"},
     "engineer": {"password": "123", "role": "Engineer"},
-    "admin": {"password": "123", "role": "Admin"}  # <-- ADDED THIS LINE
+    "admin": {"password": "123", "role": "Admin"}  # <-- Admin account included
 }
 
 # --- 3. LOGIN MODULE ---
@@ -76,10 +76,25 @@ def user_dashboard():
         ward = st.text_input("Ward / Department")
         dept = st.selectbox("Help Department", ["IT", "Maintenance"])
         
-        if dept == "IT":
-            issue = st.selectbox("Issue", ["PC Issue", "Printer", "Network", "Software", "Other"])
-        else:
-            issue = st.selectbox("Issue", ["AC", "Lights", "Plumbing", "Furniture", "Other"])
+        # --- DYNAMIC DROPDOWN ADDED HERE ---
+        if dept == "Maintenance":
+            issue = st.selectbox("Issue Type", [
+                "AC not working",
+                "Fan not working",
+                "Light not working",
+                "Tap leakage",
+                "Telephone line issue",
+                "Request for new installation (AC/Fan/TV etc)"
+            ]) # 
+        elif dept == "IT":
+            issue = st.selectbox("Issue Type", [
+                "PC not working",
+                "Printer not working",
+                "Scanner malfunction",
+                "Network issue",
+                "Internet downtime",
+                "Software not working"
+            ]) # 
             
         desc = st.text_area("Description")
         priority = st.selectbox("Priority", ["Low", "Medium", "High"])
@@ -228,5 +243,5 @@ else:
         supervisor_dashboard()
     elif st.session_state.role == "Engineer":
         engineer_dashboard()
-    elif st.session_state.role == "Admin":      # <-- ADDED THIS
-        admin_dashboard()                       # <-- ADDED THIS
+    elif st.session_state.role == "Admin":      
+        admin_dashboard()
