@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import time
 from datetime import datetime, timedelta, timezone
 from streamlit_gsheets import GSheetsConnection
 
@@ -54,23 +55,19 @@ def login():
             safe_username = username.lower()
             df = get_data()
             
-            # Find all names that have tickets assigned to them in the database
             if not df.empty and "Assigned To" in df.columns:
                 assigned_engineers = df["Assigned To"].str.lower().unique().tolist()
             else:
                 assigned_engineers = []
             
-            # 1. Check if it's a hardcoded main user (Staff, Admin, Supervisors)
             if safe_username in USERS and USERS[safe_username]["password"] == password:
                 st.session_state.logged_in = True
                 st.session_state.username = safe_username
                 st.session_state.role = USERS[safe_username]["role"]
-                # Save their department if they are a supervisor
                 if "dept" in USERS[safe_username]:
                     st.session_state.dept = USERS[safe_username]["dept"]
                 st.rerun()
                 
-            # 2. DYNAMIC ENGINEER LOGIN: Check if they are an assigned engineer!
             elif safe_username in assigned_engineers and safe_username != "unassigned" and password == "123":
                 st.session_state.logged_in = True
                 st.session_state.username = safe_username
@@ -78,7 +75,7 @@ def login():
                 st.rerun()
                 
             else:
-                st.error("Invalid credentials. (Engineers: Ensure your supervisor assigned you a ticket and use password '123')")
+                st.error("Invalid credentials. (Engineers: Ensure your supervisor assigned you a ticket using your exact unique username and use password '123')")
 
 # --- 4. DASHBOARDS ---
 
@@ -124,13 +121,11 @@ def user_dashboard():
         st.dataframe(my_tickets)
 
 def supervisor_dashboard():
-    # Only show the department name for this specific supervisor
     my_dept = st.session_state.dept
     st.header(f"Supervisor Dashboard ({my_dept} Department)")
     
     df = get_data()
     
-    # Filter the entire database so this supervisor ONLY sees their department's tickets
     if not df.empty:
         df_filtered = df[df["Help Department"] == my_dept]
     else:
@@ -141,20 +136,24 @@ def supervisor_dashboard():
     st.subheader("Assign Ticket")
     with st.form("assign"):
         if not df_filtered.empty and "Assigned To" in df_filtered.columns:
-            # Only show UNASSIGNED tickets for THEIR department
             open_tickets = df_filtered[df_filtered["Assigned To"] == "Unassigned"]["Ticket ID"].tolist()
         else:
             open_tickets = []
             
         t_id = st.selectbox("Select Ticket", open_tickets) if open_tickets else None
-        eng_name = st.text_input("Assign to Engineer (e.g., 'hello1')")
+        
+        # --- FIX: UI Update to enforce unique usernames ---
+        eng_name = st.text_input("Assign to Engineer Username (Must be UNIQUE)")
+        st.caption("⚠️ Pro-Tip: To avoid mixing up engineers with the same name, use their Employee ID or format like 'firstname_lastname' (e.g., rahul_101).")
         
         if st.form_submit_button("Assign"):
             if t_id and eng_name:
                 safe_eng_name = eng_name.lower().strip()
                 update_ticket_status(t_id, "Assigned To", safe_eng_name)
                 update_ticket_status(t_id, "Status", "Assigned")
-                st.success(f"Ticket assigned! {safe_eng_name} can now log in using password '123'.")
+                
+                st.toast(f"✅ Updated! Ticket assigned to {safe_eng_name}")
+                time.sleep(1.5) 
                 st.rerun()
 
 def admin_dashboard():
@@ -216,9 +215,7 @@ def engineer_dashboard():
     st.header(f"Engineer: {st.session_state.username}")
     df = get_data()
     
-    # Filter the database so the engineer ONLY sees tickets assigned to them
     if not df.empty and "Status" in df.columns:
-        # We make sure the assignment name matches their username perfectly
         my_tasks = df[(df["Status"].isin(["Assigned", "In Progress"])) & (df["Assigned To"].str.lower() == st.session_state.username)]
     else:
         my_tasks = pd.DataFrame()
@@ -233,7 +230,9 @@ def engineer_dashboard():
         if st.form_submit_button("Update"):
             if t_id:
                 update_ticket_status(t_id, "Status", status)
-                st.success("Updated!")
+                
+                st.toast(f"🚀 Status successfully updated to {status}!")
+                time.sleep(1.5)
                 st.rerun()
 
 # --- 5. MAIN APP ---
