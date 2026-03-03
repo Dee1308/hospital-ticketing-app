@@ -1,33 +1,30 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from streamlit_gsheets import GSheetsConnection
 
+# --- TIMEZONE SETUP ---
+IST = timezone(timedelta(hours=5, minutes=30))
+
 # --- 1. SETUP DATABASE CONNECTION ---
-# This establishes a live connection to your Google Sheet
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# Function to fetch latest data
 def get_data():
-    # ttl=0 means "don't cache, always get fresh data"
     return conn.read(worksheet="Tickets", ttl=0)
 
-# Function to save data
 def add_data(new_row_df):
     try:
         current_data = get_data()
         updated_data = pd.concat([current_data, new_row_df], ignore_index=True)
         conn.update(worksheet="Tickets", data=updated_data)
-        st.cache_data.clear() # Clear cache to force reload next time
+        st.cache_data.clear() 
         return True
     except Exception as e:
         st.error(f"Database Error: {e}")
         return False
 
-# Function to update a specific ticket (for Supervisors/Engineers)
 def update_ticket_status(ticket_id, col_name, new_value):
     df = get_data()
-    # Find the row index
     mask = df["Ticket ID"] == ticket_id
     if mask.any():
         df.loc[mask, col_name] = new_value
@@ -36,12 +33,12 @@ def update_ticket_status(ticket_id, col_name, new_value):
         return True
     return False
 
-# --- 2. USERS (Still Hardcoded for Safety) ---
+# --- 2. USERS (Updated for dual supervisors) ---
 USERS = {
     "staff": {"password": "123", "role": "User"},
-    "supervisor": {"password": "123", "role": "Supervisor"},
-    "engineer": {"password": "123", "role": "Engineer"},
-    "admin": {"password": "123", "role": "Admin"}  # <-- Admin account included
+    "it_super": {"password": "123", "role": "Supervisor", "dept": "IT"},
+    "maint_super": {"password": "123", "role": "Supervisor", "dept": "Maintenance"},
+    "admin": {"password": "123", "role": "Admin"}  
 }
 
 # --- 3. LOGIN MODULE ---
@@ -54,59 +51,64 @@ def login():
         submitted = st.form_submit_button("Login")
         
         if submitted:
-            # Convert whatever they typed into lowercase right away
             safe_username = username.lower()
+            df = get_data()
             
-            # Check the lowercase version against our database
+            # Find all names that have tickets assigned to them in the database
+            if not df.empty and "Assigned To" in df.columns:
+                assigned_engineers = df["Assigned To"].str.lower().unique().tolist()
+            else:
+                assigned_engineers = []
+            
+            # 1. Check if it's a hardcoded main user (Staff, Admin, Supervisors)
             if safe_username in USERS and USERS[safe_username]["password"] == password:
                 st.session_state.logged_in = True
                 st.session_state.username = safe_username
                 st.session_state.role = USERS[safe_username]["role"]
+                # Save their department if they are a supervisor
+                if "dept" in USERS[safe_username]:
+                    st.session_state.dept = USERS[safe_username]["dept"]
                 st.rerun()
+                
+            # 2. DYNAMIC ENGINEER LOGIN: Check if they are an assigned engineer!
+            elif safe_username in assigned_engineers and safe_username != "unassigned" and password == "123":
+                st.session_state.logged_in = True
+                st.session_state.username = safe_username
+                st.session_state.role = "Engineer"
+                st.rerun()
+                
             else:
-                st.error("Invalid credentials")
+                st.error("Invalid credentials. (Engineers: Ensure your supervisor assigned you a ticket and use password '123')")
 
 # --- 4. DASHBOARDS ---
+
 def user_dashboard():
     st.header(f"Welcome, {st.session_state.username}")
-    
     st.subheader("Raise a New Ticket")
-    
-    # Notice we removed the 'with st.form():' line!
-    # Now the page will update instantly when you click a dropdown.
     
     ward = st.text_input("Ward / Department")
     dept = st.selectbox("Help Department", ["IT", "Maintenance"])
     
-    # --- DYNAMIC DROPDOWN ---
     if dept == "Maintenance":
         issue = st.selectbox("Issue Type", [
-            "Air condition",
-            "Plumbing",
-            "Electrical",
-            "Paint",
-            "Other maintenance related issue"
+            "Air condition", "Plumbing", "Electrical", "Paint", "Other maintenance related issue"
         ]) 
     elif dept == "IT":
         issue = st.selectbox("Issue Type", [
-            "PC not working",
-            "Printer not working",
-            "Network issue",
-            "Other IT related issue"
+            "PC not working", "Printer not working", "Network issue", "Other IT related issue"
         ]) 
         
     desc = st.text_area("Description")
     priority = st.selectbox("Priority", ["Low", "Medium", "High"])
     
-    # We changed this to a regular st.button
     if st.button("Submit Ticket"):
         if ward and desc:
-            ticket_id = f"TKT-{datetime.now().strftime('%d%H%M%S')}"
+            ticket_id = f"TKT-{datetime.now(IST).strftime('%d%H%M%S')}"
             new_ticket = pd.DataFrame([{
                 "Ticket ID": ticket_id, "Raised By": st.session_state.username,
                 "Ward": ward, "Help Department": dept, "Issue Type": issue,
                 "Description": desc, "Priority": priority, "Status": "Open",
-                "Assigned To": "Unassigned", "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M")
+                "Assigned To": "Unassigned", "Timestamp": datetime.now(IST).strftime("%Y-%m-%d %I:%M %p") 
             }])
             
             if add_data(new_ticket):
@@ -114,43 +116,45 @@ def user_dashboard():
         else:
             st.warning("Please fill all fields")
 
-    # View My Tickets
     st.write("---")
     st.subheader("My Past Tickets")
     df = get_data()
-    # Filter for current user. Note: Check column names match Sheet exactly!
-    if not df.empty and "Raised By" in df.columns:
-        my_tickets = df[df["Raised By"] == st.session_state.username]
-        st.dataframe(my_tickets)
-
-    # View My Tickets
-    st.subheader("My Past Tickets")
-    df = get_data()
-    # Filter for current user. Note: Check column names match Sheet exactly!
     if not df.empty and "Raised By" in df.columns:
         my_tickets = df[df["Raised By"] == st.session_state.username]
         st.dataframe(my_tickets)
 
 def supervisor_dashboard():
-    st.header("Supervisor Dashboard")
+    # Only show the department name for this specific supervisor
+    my_dept = st.session_state.dept
+    st.header(f"Supervisor Dashboard ({my_dept} Department)")
+    
     df = get_data()
-    st.dataframe(df)
+    
+    # Filter the entire database so this supervisor ONLY sees their department's tickets
+    if not df.empty:
+        df_filtered = df[df["Help Department"] == my_dept]
+    else:
+        df_filtered = pd.DataFrame()
+        
+    st.dataframe(df_filtered)
     
     st.subheader("Assign Ticket")
     with st.form("assign"):
-        if not df.empty and "Assigned To" in df.columns:
-            open_tickets = df[df["Assigned To"] == "Unassigned"]["Ticket ID"].tolist()
+        if not df_filtered.empty and "Assigned To" in df_filtered.columns:
+            # Only show UNASSIGNED tickets for THEIR department
+            open_tickets = df_filtered[df_filtered["Assigned To"] == "Unassigned"]["Ticket ID"].tolist()
         else:
             open_tickets = []
             
         t_id = st.selectbox("Select Ticket", open_tickets) if open_tickets else None
-        eng_name = st.text_input("Assign to Engineer (Name)")
+        eng_name = st.text_input("Assign to Engineer (e.g., 'hello1')")
         
         if st.form_submit_button("Assign"):
             if t_id and eng_name:
-                update_ticket_status(t_id, "Assigned To", eng_name)
+                safe_eng_name = eng_name.lower().strip()
+                update_ticket_status(t_id, "Assigned To", safe_eng_name)
                 update_ticket_status(t_id, "Status", "Assigned")
-                st.success("Assigned!")
+                st.success(f"Ticket assigned! {safe_eng_name} can now log in using password '123'.")
                 st.rerun()
 
 def admin_dashboard():
@@ -163,7 +167,6 @@ def admin_dashboard():
         st.warning("No tickets in the database yet.")
         return
 
-    # --- High-Level Metrics ---
     st.subheader("System Overview")
     col1, col2, col3, col4 = st.columns(4)
     
@@ -177,18 +180,16 @@ def admin_dashboard():
     col3.metric("Assigned", assigned_tickets)
     col4.metric("Resolved", resolved_tickets)
 
-    # --- Charts & Analytics ---
     st.write("---")
     col_chart1, col_chart2 = st.columns(2)
 
     with col_chart1:
-        st.subheader("Department Breakdown") #
+        st.subheader("Department Breakdown") 
         dept_counts = df["Help Department"].value_counts()
         st.bar_chart(dept_counts)
 
     with col_chart2:
-        st.subheader("Engineer Workload") #
-        # Filter out unassigned tickets to see actual engineer workload
+        st.subheader("Engineer Workload") 
         assigned_df = df[df["Assigned To"] != "Unassigned"]
         if not assigned_df.empty:
             eng_counts = assigned_df["Assigned To"].value_counts()
@@ -196,17 +197,15 @@ def admin_dashboard():
         else:
             st.info("No tickets assigned to engineers yet.")
 
-    # --- Data Export ---
     st.write("---")
     st.subheader("Export System Data")
     
-    # Convert dataframe to CSV format
     csv = df.to_csv(index=False).encode('utf-8')
     
     st.download_button(
         label="📥 Download Full Report as CSV (Excel)",
         data=csv,
-        file_name=f"hospital_tickets_report_{datetime.now().strftime('%Y%m%d')}.csv",
+        file_name=f"hospital_tickets_report_{datetime.now(IST).strftime('%Y%m%d')}.csv",
         mime="text/csv",
     )
     
@@ -217,8 +216,10 @@ def engineer_dashboard():
     st.header(f"Engineer: {st.session_state.username}")
     df = get_data()
     
+    # Filter the database so the engineer ONLY sees tickets assigned to them
     if not df.empty and "Status" in df.columns:
-        my_tasks = df[df["Status"] == "Assigned"] 
+        # We make sure the assignment name matches their username perfectly
+        my_tasks = df[(df["Status"].isin(["Assigned", "In Progress"])) & (df["Assigned To"].str.lower() == st.session_state.username)]
     else:
         my_tasks = pd.DataFrame()
         
