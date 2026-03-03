@@ -79,21 +79,18 @@ def user_dashboard():
         # --- DYNAMIC DROPDOWN ADDED HERE ---
         if dept == "Maintenance":
             issue = st.selectbox("Issue Type", [
-                "AC not working",
-                "Fan not working",
-                "Light not working",
-                "Tap leakage",
-                "Telephone line issue",
-                "Request for new installation (AC/Fan/TV etc)"
-            ]) # 
+                "Air condition",
+                "Plumbing",
+                "Electrical",
+                "Paint",
+                "Other maintenance related issue"
+            ]) 
         elif dept == "IT":
             issue = st.selectbox("Issue Type", [
                 "PC not working",
                 "Printer not working",
-                "Scanner malfunction",
                 "Network issue",
-                "Internet downtime",
-                "Software not working"
+                "Other IT related issue"
             ]) # 
             
         desc = st.text_area("Description")
@@ -154,7 +151,7 @@ def admin_dashboard():
         st.warning("No tickets in the database yet.")
         return
 
-    # --- High-Level Metrics [cite: 68] ---
+    # --- High-Level Metrics ---
     st.subheader("System Overview")
     col1, col2, col3, col4 = st.columns(4)
     
@@ -173,12 +170,12 @@ def admin_dashboard():
     col_chart1, col_chart2 = st.columns(2)
 
     with col_chart1:
-        st.subheader("Department Breakdown") # [cite: 71]
+        st.subheader("Department Breakdown") #
         dept_counts = df["Help Department"].value_counts()
         st.bar_chart(dept_counts)
 
     with col_chart2:
-        st.subheader("Engineer Workload") # [cite: 70]
+        st.subheader("Engineer Workload") #
         # Filter out unassigned tickets to see actual engineer workload
         assigned_df = df[df["Assigned To"] != "Unassigned"]
         if not assigned_df.empty:
@@ -187,7 +184,7 @@ def admin_dashboard():
         else:
             st.info("No tickets assigned to engineers yet.")
 
-    # --- Data Export [cite: 73] ---
+    # --- Data Export ---
     st.write("---")
     st.subheader("Export System Data")
     
