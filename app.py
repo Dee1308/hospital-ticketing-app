@@ -67,49 +67,61 @@ def login():
                 st.error("Invalid credentials")
 
 # --- 4. DASHBOARDS ---
-
 def user_dashboard():
     st.header(f"Welcome, {st.session_state.username}")
     
-    # Form to raise ticket
-    with st.form("ticket_form"):
-        ward = st.text_input("Ward / Department")
-        dept = st.selectbox("Help Department", ["IT", "Maintenance"])
+    st.subheader("Raise a New Ticket")
+    
+    # Notice we removed the 'with st.form():' line!
+    # Now the page will update instantly when you click a dropdown.
+    
+    ward = st.text_input("Ward / Department")
+    dept = st.selectbox("Help Department", ["IT", "Maintenance"])
+    
+    # --- DYNAMIC DROPDOWN ---
+    if dept == "Maintenance":
+        issue = st.selectbox("Issue Type", [
+            "Air condition",
+            "Plumbing",
+            "Electrical",
+            "Paint",
+            "Other maintenance related issue"
+        ]) 
+    elif dept == "IT":
+        issue = st.selectbox("Issue Type", [
+            "PC not working",
+            "Printer not working",
+            "Network issue",
+            "Other IT related issue"
+        ]) 
         
-        # --- DYNAMIC DROPDOWN ADDED HERE ---
-        if dept == "Maintenance":
-            issue = st.selectbox("Issue Type", [
-                "Air condition",
-                "Plumbing",
-                "Electrical",
-                "Paint",
-                "Other maintenance related issue"
-            ]) 
-        elif dept == "IT":
-            issue = st.selectbox("Issue Type", [
-                "PC not working",
-                "Printer not working",
-                "Network issue",
-                "Other IT related issue"
-            ]) # 
+    desc = st.text_area("Description")
+    priority = st.selectbox("Priority", ["Low", "Medium", "High"])
+    
+    # We changed this to a regular st.button
+    if st.button("Submit Ticket"):
+        if ward and desc:
+            ticket_id = f"TKT-{datetime.now().strftime('%d%H%M%S')}"
+            new_ticket = pd.DataFrame([{
+                "Ticket ID": ticket_id, "Raised By": st.session_state.username,
+                "Ward": ward, "Help Department": dept, "Issue Type": issue,
+                "Description": desc, "Priority": priority, "Status": "Open",
+                "Assigned To": "Unassigned", "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M")
+            }])
             
-        desc = st.text_area("Description")
-        priority = st.selectbox("Priority", ["Low", "Medium", "High"])
-        
-        if st.form_submit_button("Submit Ticket"):
-            if ward and desc:
-                ticket_id = f"TKT-{datetime.now().strftime('%d%H%M%S')}"
-                new_ticket = pd.DataFrame([{
-                    "Ticket ID": ticket_id, "Raised By": st.session_state.username,
-                    "Ward": ward, "Help Department": dept, "Issue Type": issue,
-                    "Description": desc, "Priority": priority, "Status": "Open",
-                    "Assigned To": "Unassigned", "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M")
-                }])
-                
-                if add_data(new_ticket):
-                    st.success(f"Ticket {ticket_id} Saved to Database!")
-            else:
-                st.warning("Please fill all fields")
+            if add_data(new_ticket):
+                st.success(f"Ticket {ticket_id} Saved to Database!")
+        else:
+            st.warning("Please fill all fields")
+
+    # View My Tickets
+    st.write("---")
+    st.subheader("My Past Tickets")
+    df = get_data()
+    # Filter for current user. Note: Check column names match Sheet exactly!
+    if not df.empty and "Raised By" in df.columns:
+        my_tickets = df[df["Raised By"] == st.session_state.username]
+        st.dataframe(my_tickets)
 
     # View My Tickets
     st.subheader("My Past Tickets")
